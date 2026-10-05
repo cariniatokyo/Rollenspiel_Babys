@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rollenspiel</title>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bleach:.80;            /* 0 = Foto voll sichtbar, 1 = komplett weiß. Hier einstellen! */
+  --ink:#2b2622; --paper:#fffdf9; --accent:#7a5c4a; --line:#e3dacf;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  font-family:'Lora',Georgia,serif; color:var(--ink); min-height:100vh;
+  background:
+    linear-gradient(rgba(255,253,249,var(--bleach)),rgba(255,253,249,var(--bleach))),
+    url(hintergrund.jpg) center/cover fixed #f3ece3;
+}
+.wrap{max-width:760px;margin:0 auto;padding:20px 14px 60px}
+h1{font-weight:600;font-size:1.5rem;margin:6px 0 14px}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;padding:8px 16px}
+button.ghost{background:transparent;color:var(--accent)}
+button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input,textarea{font:inherit;width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink)}
+.card{background:rgba(255,253,249,.93);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+#login{max-width:340px;margin:12vh auto}
+#login input{margin-bottom:10px}
+.turn{font-style:italic;color:var(--accent);margin:0 0 10px}
+.roles{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.role{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 5px;border:2px solid var(--line);border-radius:30px;background:var(--paper);color:var(--ink)}
+.role.on{border-color:var(--c)}
+textarea{min-height:140px;resize:vertical;line-height:1.6}
+.post{display:flex;gap:12px;margin-bottom:14px}
+.ico{flex:none;width:48px;height:48px;border-radius:50%;background:var(--c,#999) center/cover;color:#fff;display:grid;place-items:center;font-weight:600;border:2px solid var(--c,#999)}
+.role .ico{width:34px;height:34px;font-size:.85rem}
+.body{flex:1;min-width:0}
+.name{font-weight:600;color:var(--c)}
+.time{font-size:.75rem;color:#8a7f74;margin-left:8px;font-weight:400}
+.text{white-space:pre-wrap;line-height:1.7;margin-top:4px;overflow-wrap:anywhere}
+.err{color:#a33;min-height:1.2em;font-size:.9rem}
+.hide{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div id="login" class="card hide">
+  <h1>Rollenspiel</h1>
+  <input id="mail" type="email" placeholder="E-Mail" autocomplete="username">
+  <input id="pw" type="password" placeholder="Passwort" autocomplete="current-password">
+  <button id="loginBtn" style="width:100%">Anmelden</button>
+  <p class="err" id="loginErr"></p>
+</div>
+
+<div id="app" class="hide">
+  <div class="bar"><h1>Rollenspiel</h1><button class="ghost" id="logout">Abmelden</button></div>
+  <div class="card">
+    <p class="turn" id="turn"></p>
+    <div class="roles" id="roleBtns"></div>
+    <textarea id="txt" placeholder="Dein Posting …"></textarea>
+    <div class="bar" style="margin-top:10px">
+      <span class="err" id="postErr"></span>
+      <button id="send">Posten</button>
+    </div>
+  </div>
+  <div id="feed"></div>
+  <button class="ghost" id="more" style="width:100%">Ältere Postings laden</button>
+</div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// ====== HIER EINTRAGEN (Supabase → Project Settings → API) ======
+const SUPABASE_URL  = 'https://DEIN-PROJEKT.supabase.co';
+const SUPABASE_ANON = 'DEIN-ANON-KEY';
+// ================================================================
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const $ = id => document.getElementById(id);
+const PAGE = 50;
+let roles = {}, me = null, myRole = null, oldest = null, newest = null;
+
+const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function iconEl(r){
+  const bg = r.icon ? `background-image:url(icons/${encodeURIComponent(r.icon)})` : '';
+  return `<span class="ico" style="--c:${r.color};${bg}">${r.icon ? '' : esc(r.name[0])}</span>`;
+}
+function postEl(p){
+  const r = roles[p.role_id]; if(!r) return '';
+  const d = new Date(p.created_at).toLocaleString('de-DE',{dateStyle:'short',timeStyle:'short'});
+  return `<div class="post" style="--c:${r.color}">${iconEl(r)}<div class="body">
+    <span class="name">${esc(r.name)}</span><span class="time">${d}</span>
+    <div class="text">${esc(p.content)}</div></div></div>`;
+}
+function updateTurn(){
+  if(!newest){ $('turn').textContent = 'Noch kein Posting. Du kannst beginnen.'; return; }
+  const last = roles[newest.role_id];
+  $('turn').textContent = last.player === me.player
+    ? 'Die andere Person ist dran.' : 'Du bist dran.';
+}
+
+async function loadRoles(){
+  const {data} = await db.from('roles').select('*').order('id');
+  roles = Object.fromEntries(data.map(r=>[r.id,r]));
+  const mine = data.filter(r=>r.player===me.player);
+  if(!myRole || !mine.find(r=>r.id===myRole)) myRole = mine[0]?.id;
+  $('roleBtns').innerHTML = mine.map(r =>
+    `<button class="role ${r.id===myRole?'on':''}" style="--c:${r.color}" data-id="${r.id}">${iconEl(r)}${esc(r.name)}</button>`).join('');
+  document.querySelectorAll('.role').forEach(b => b.onclick = () => { myRole = +b.dataset.id; loadRoles(); });
+}
+
+async function loadFeed(){
+  const {data} = await db.from('posts').select('*').order('id',{ascending:false}).limit(PAGE);
+  $('feed').innerHTML = data.map(postEl).join('');
+  newest = data[0] || null; oldest = data.length ? data[data.length-1].id : null;
+  $('more').classList.toggle('hide', data.length < PAGE);
+  updateTurn();
+}
+$('more').onclick = async () => {
+  const {data} = await db.from('posts').select('*').lt('id',oldest).order('id',{ascending:false}).limit(PAGE);
+  $('feed').insertAdjacentHTML('beforeend', data.map(postEl).join(''));
+  if(data.length) oldest = data[data.length-1].id;
+  if(data.length < PAGE) $('more').classList.add('hide');
+};
+
+$('send').onclick = async () => {
+  const content = $('txt').value.trim();
+  if(!content) return;
+  $('send').disabled = true; $('postErr').textContent = '';
+  const {error} = await db.from('posts').insert({role_id:myRole, content});
+  $('send').disabled = false;
+  if(error){ $('postErr').textContent = 'Posten fehlgeschlagen: ' + error.message; return; }
+  $('txt').value = ''; loadFeed();
+};
+
+$('loginBtn').onclick = async () => {
+  const {error} = await db.auth.signInWithPassword({email:$('mail').value, password:$('pw').value});
+  if(error) $('loginErr').textContent = 'Anmeldung fehlgeschlagen. Bitte E-Mail und Passwort prüfen.';
+  else start();
+};
+$('logout').onclick = async () => { await db.auth.signOut(); location.reload(); };
+
+async function start(){
+  const {data:{session}} = await db.auth.getSession();
+  if(!session){ $('login').classList.remove('hide'); return; }
+  const {data} = await db.from('profiles').select('player').eq('user_id',session.user.id).single();
+  if(!data){ $('login').classList.remove('hide'); $('loginErr').textContent='Dein Konto ist noch keiner Person zugeordnet.'; return; }
+  me = data;
+  $('login').classList.add('hide'); $('app').classList.remove('hide');
+  await loadRoles(); await loadFeed();
+  setInterval(loadFeed, 60000);   // prüft jede Minute auf neue Postings
+}
+start();
+</script>
+</body>
+</html>
