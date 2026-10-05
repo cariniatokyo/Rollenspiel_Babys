@@ -86,7 +86,7 @@ let roles = {}, me = null, myRole = null, oldest = null, newest = null;
 const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 function iconEl(r){
-  const bg = r.icon ? `background-image:url(icons/${encodeURIComponent(r.icon)})` : '';
+  const bg = r.icon ? `background-image:url(${encodeURIComponent(r.icon)})` : '';
   return `<span class="ico" style="--c:${r.color};${bg}">${r.icon ? '' : esc(r.name[0])}</span>`;
 }
 function postEl(p){
